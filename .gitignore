@@ -1,0 +1,13 @@
+# Build output
+/demo
+/orderbook-engine
+*.out
+*.test
+
+# Coverage
+coverage.*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
