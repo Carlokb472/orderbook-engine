@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>orderbook-engine — explained / 詳解</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2a3240;
+    --txt:#d6deeb; --muted:#8b97a8; --accent:#4ea1ff; --green:#3fb950;
+    --red:#f85149; --amber:#d29922; --code:#0a0e14; --codetxt:#c9d6e3;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang HK","Hiragino Sans GB","Microsoft JhengHei",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.65; font-size:16px;
+  }
+  .wrap{max-width:920px; margin:0 auto; padding:0 22px 120px}
+  header.hero{
+    text-align:center; padding:64px 22px 40px;
+    background:radial-gradient(1200px 400px at 50% -120px, rgba(78,161,255,.18), transparent);
+    border-bottom:1px solid var(--border);
+  }
+  header.hero h1{font-size:2.4rem; margin:0 0 8px; letter-spacing:-.5px}
+  header.hero .tag{color:var(--muted); font-size:1.05rem; margin:0}
+  header.hero code{color:var(--accent)}
+  .badges{margin-top:18px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap}
+  .badge{
+    font-size:.78rem; padding:4px 10px; border-radius:999px;
+    border:1px solid var(--border); background:var(--panel); color:var(--muted);
+  }
+
+  /* language toggle */
+  .langbar{
+    position:sticky; top:0; z-index:50; backdrop-filter:blur(8px);
+    background:rgba(13,17,23,.82); border-bottom:1px solid var(--border);
+    display:flex; gap:8px; justify-content:center; padding:12px;
+  }
+  .langbar button{
+    font:inherit; cursor:pointer; padding:7px 20px; border-radius:8px;
+    border:1px solid var(--border); background:var(--panel); color:var(--muted);
+    transition:.15s; font-weight:600; font-size:.92rem;
+  }
+  .langbar button:hover{color:var(--txt); border-color:var(--accent)}
+  .langbar button.active{background:var(--accent); color:#05101f; border-color:var(--accent)}
+
+  section{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:26px 28px; margin-top:24px;
+  }
+  section h2{
+    margin:0 0 6px; font-size:1.45rem; display:flex; align-items:center; gap:12px;
+  }
+  section h2 .n{
+    flex:0 0 auto; width:34px; height:34px; border-radius:9px;
+    background:var(--panel2); border:1px solid var(--border); color:var(--accent);
+    display:grid; place-items:center; font-size:1rem; font-weight:700;
+  }
+  section h3{font-size:1.08rem; margin:22px 0 6px; color:#e8eef6}
+  p{margin:10px 0}
+  .muted{color:var(--muted)}
+  strong{color:#fff}
+  a{color:var(--accent)}
+  ul,ol{margin:10px 0; padding-left:22px}
+  li{margin:6px 0}
+
+  code:not(pre code){
+    background:var(--code); color:var(--accent); padding:2px 6px;
+    border-radius:5px; font-size:.86em;
+    font-family:"SF Mono",ui-monospace,Menlo,Monaco,Consolas,monospace;
+  }
+  pre{
+    background:var(--code); color:var(--codetxt); border:1px solid var(--border);
+    border-radius:10px; padding:16px 18px; overflow:auto; font-size:.86rem;
+    font-family:"SF Mono",ui-monospace,Menlo,Monaco,Consolas,monospace; line-height:1.55;
+  }
+  pre .cmt{color:#6b7686}
+  pre .kw{color:#ff7b72}
+  pre .str{color:#a5d6ff}
+  pre .fn{color:#d2a8ff}
+
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:.92rem}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left; vertical-align:top}
+  th{background:var(--panel2); color:#e8eef6}
+
+  .callout{
+    border-left:3px solid var(--amber); background:rgba(210,153,34,.08);
+    padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0;
+  }
+  .callout.blue{border-color:var(--accent); background:rgba(78,161,255,.08)}
+  .callout.green{border-color:var(--green); background:rgba(63,185,80,.08)}
+
+  /* order book ladder */
+  .ladder{
+    font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:.9rem;
+    background:var(--code); border:1px solid var(--border); border-radius:10px;
+    padding:14px 16px; margin:14px 0; max-width:340px;
+  }
+  .ladder .row{display:flex; justify-content:space-between; padding:2px 4px; border-radius:4px}
+  .ladder .ask{color:var(--red)}
+  .ladder .bid{color:var(--green)}
+  .ladder .spread{color:var(--muted); text-align:center; border-top:1px dashed var(--border); border-bottom:1px dashed var(--border); margin:6px 0; padding:4px; font-size:.8rem; display:block}
+  .ladder .row .q{color:var(--muted)}
+
+  .trade{color:var(--amber); font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:.86rem}
+
+  .lang-zh{display:none}
+  body.show-zh .lang-en{display:none}
+  body.show-zh .lang-zh{display:block}
+  body.show-zh .lang-zh.inline{display:inline}
+
+  footer{text-align:center; color:var(--muted); font-size:.85rem; margin-top:40px}
+  .toc{font-size:.92rem}
+  .toc a{display:inline-block; margin:3px 10px 3px 0; color:var(--muted); text-decoration:none}
+  .toc a:hover{color:var(--accent)}
+
+  /* ===== detailed walkthrough ===== */
+  .vs{display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; margin:14px 0}
+  .vs .col{flex:1 1 240px; min-width:230px}
+  .vs .col h4{margin:0 0 8px; font-size:.85rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; font-weight:700}
+  .taker-card{
+    font-family:"SF Mono",ui-monospace,Menlo,monospace;
+    background:linear-gradient(180deg, rgba(78,161,255,.16), rgba(78,161,255,.05));
+    border:1px solid var(--accent); border-radius:10px; padding:16px; text-align:center;
+  }
+  .taker-card .big{font-size:1.5rem; color:#fff; font-weight:700; letter-spacing:1px}
+  .taker-card .sub{color:var(--muted); font-size:.8rem; margin-top:4px}
+
+  .step{
+    display:flex; gap:14px; align-items:flex-start; margin:0;
+    padding:16px 0; border-top:1px solid var(--border);
+  }
+  .step:first-of-type{border-top:none}
+  .step .dot{
+    flex:0 0 auto; width:30px; height:30px; border-radius:50%;
+    background:var(--panel2); border:1px solid var(--accent); color:var(--accent);
+    display:grid; place-items:center; font-weight:700; font-size:.9rem;
+  }
+  .step.done .dot{border-color:var(--green); color:var(--green)}
+  .step .body{flex:1 1 auto; min-width:0}
+  .step .body .t{margin:0 0 6px}
+  .meter{
+    font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:.84rem;
+    background:var(--code); border:1px solid var(--border); border-radius:8px;
+    padding:8px 12px; margin:6px 0; display:inline-block;
+  }
+  .meter b{color:var(--amber)}
+  .meter .ok{color:var(--green)}
+  .chip{
+    display:inline-block; font-family:"SF Mono",ui-monospace,Menlo,monospace;
+    font-size:.78rem; padding:2px 8px; border-radius:5px; margin:1px 2px;
+    border:1px solid var(--border);
+  }
+  .chip.ask{color:var(--red); background:rgba(248,81,73,.08)}
+  .chip.bid{color:var(--green); background:rgba(63,185,80,.08)}
+  .chip.eat{color:var(--amber); background:rgba(210,153,34,.1); border-color:var(--amber)}
+  .chip.gone{text-decoration:line-through; opacity:.5}
+  .arrow{color:var(--muted); margin:0 6px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>📖 orderbook-engine</h1>
+  <p class="tag lang-en">A price-time priority matching engine, explained — from market concepts down to the code.</p>
+  <p class="tag lang-zh">價格-時間優先撮合引擎詳解 —— 由市場概念講到落代碼。</p>
+  <div class="badges">
+    <span class="badge">Go 1.22</span>
+    <span class="badge">~270 lines</span>
+    <span class="badge">zero dependencies</span>
+    <span class="badge">12 passing tests</span>
+  </div>
+</header>
+
+<div class="langbar">
+  <button id="btn-en" class="active" onclick="setLang('en')">English</button>
+  <button id="btn-zh" onclick="setLang('zh')">廣東話</button>
+</div>
+
+<div class="wrap">
+
+  <section>
+    <div class="toc">
+      <span class="lang-en"><strong>Contents:</strong></span>
+      <span class="lang-zh"><strong>目錄:</strong></span>
+      <a href="#s1"><span class="lang-en">1 · What it is</span><span class="lang-zh inline">1 · 係乜嘢</span></a>
+      <a href="#s2"><span class="lang-en">2 · Domain concepts</span><span class="lang-zh inline">2 · 行業概念</span></a>
+      <a href="#s3"><span class="lang-en">3 · Architecture</span><span class="lang-zh inline">3 · 架構</span></a>
+      <a href="#s4"><span class="lang-en">4 · Data structures</span><span class="lang-zh inline">4 · 數據結構</span></a>
+      <a href="#s5"><span class="lang-en">5 · Matching algorithm</span><span class="lang-zh inline">5 · 撮合演算法</span></a>
+      <a href="#s6"><span class="lang-en">6 · Demo decoded</span><span class="lang-zh inline">6 · Demo 拆解</span></a>
+      <a href="#s7"><span class="lang-en">7 · Trade-offs</span><span class="lang-zh inline">7 · 工程取捨</span></a>
+      <a href="#s8"><span class="lang-en">8 · How to learn it</span><span class="lang-zh inline">8 · 點樣學</span></a>
+    </div>
+  </section>
+
+  <!-- ============ 1 ============ -->
+  <section id="s1">
+    <h2><span class="n">1</span><span class="lang-en">What this thing is</span><span class="lang-zh">呢個 project 係乜嘢</span></h2>
+    <div class="lang-en">
+      <p>It's the beating heart of a stock/crypto exchange, in ~270 lines of Go with <strong>zero dependencies</strong>. When you place an order on Coinbase or NASDAQ, somewhere a piece of code decides <em>who trades with whom, at what price, in what order</em>. That piece is a <strong>matching engine</strong> sitting on top of an <strong>order book</strong>. This repo is a clean reference implementation of exactly that, for a single instrument (one symbol, like just "BTC").</p>
+      <p>It's a portfolio project, so it's optimised for <strong>clarity and correctness</strong>, not raw speed — and the README is honest about that.</p>
+    </div>
+    <div class="lang-zh">
+      <p>簡單講,佢就係<strong>證券/加密貨幣交易所嘅心臟</strong>,用 Go 寫,得返大概 270 行,而且<strong>冇用任何第三方 library</strong>(zero dependency)。你喺 Coinbase 或者證券行落單嗰陣,後台一定有段 code 決定:<em>邊個同邊個成交、用咩價成交、邊個排頭先成交</em>。呢段 code 就叫做 <strong>matching engine(撮合引擎)</strong>,佢搭喺一個 <strong>order book(訂單簿)</strong>上面。呢個 repo 就係將呢樣嘢乾淨咁實現出嚟,專做一隻商品。</p>
+      <p>因為佢係 portfolio project(作品集),所以重點係<strong>清晰同正確</strong>,唔係追求極速。README 自己都好坦白咁講明呢點。</p>
+    </div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section id="s2">
+    <h2><span class="n">2</span><span class="lang-en">The domain concepts</span><span class="lang-zh">行業概念(好多人會跳過)</span></h2>
+
+    <div class="lang-en">
+      <p>An <strong>order book</strong> is just the list of everyone who wants to trade but hasn't yet. Two sides:</p>
+      <ul>
+        <li><strong>Bids</strong> = buyers. ("I'll buy 5 at price 99.")</li>
+        <li><strong>Asks</strong> (offers) = sellers. ("I'll sell 5 at price 101.")</li>
+      </ul>
+      <p>A <strong>resting order</strong> = an order sitting on the book waiting. A <strong>maker</strong> <em>makes</em> liquidity (posted and waited); a <strong>taker</strong> <em>takes</em> liquidity (their incoming order matches a resting one). The same order can be a taker for part and a maker for the rest.</p>
+      <p>The <strong>spread</strong> = the gap between best bid and best ask. A trade only happens when an incoming order <strong>crosses</strong> the spread (a buyer willing to pay ≥ the lowest ask, or a seller willing to accept ≤ the highest bid).</p>
+
+      <h3>Price-time priority — the whole point</h3>
+      <ol>
+        <li><strong>Price first.</strong> Best price wins. A taker buying fills the <em>cheapest</em> ask first; a taker selling fills the <em>highest</em> bid first.</li>
+        <li><strong>Time second (FIFO).</strong> Tie on price? Whoever rested <em>earliest</em> fills first. You can't jump the queue by being louder — only by offering a better price or arriving earlier.</li>
+      </ol>
+
+      <div class="callout blue">
+        <strong>Maker-price execution (the subtle rule):</strong> a trade executes at the <em>resting</em> (maker) order's price, not the taker's. Put in a buy limit "willing to pay up to 105" against a resting ask at 100 → you pay <strong>100</strong>. That's <em>price improvement</em>, and it's how real markets work.
+      </div>
+
+      <h3>Limit vs market</h3>
+      <ul>
+        <li><strong>Limit</strong> = "trade, but only at my price or better." Unfilled remainder <em>rests</em> on the book (becomes a maker).</li>
+        <li><strong>Market</strong> = "trade NOW at any price." Sweeps the book greedily; any unfilled remainder is <strong>dropped</strong> — a market order never rests.</li>
+      </ul>
+
+      <div class="callout green">
+        <strong>Integer prices.</strong> Everything is <code>int64</code> (cents / lots), never <code>float64</code>. Floats can't represent 0.10 exactly, so financial code uses integers for exact arithmetic. A real correctness decision, not a toy choice.
+      </div>
+    </div>
+
+    <div class="lang-zh">
+      <p><strong>Order book(訂單簿)</strong>其實就係一張清單,記住晒所有「想買賣但未成交」嘅人。分兩邊:</p>
+      <ul>
+        <li><strong>Bids(買盤)</strong> = 啲買家。(「我出 99 蚊買 5 個。」)</li>
+        <li><strong>Asks(賣盤)</strong> = 啲賣家。(「我出 101 蚊賣 5 個。」)</li>
+      </ul>
+      <p><strong>Resting order(掛單)</strong> = 一張喺度排緊隊、等緊成交嘅單。<strong>Maker(掛單者)</strong>製造流動性(早早掛咗單喺度等);<strong>Taker(食單者)</strong>攞走流動性(新單一入嚟就同人哋啲掛單成交)。同一張單可以一部分做 taker,剩低嗰部分做 maker。</p>
+      <p><strong>Spread(價差)</strong> = 最佳買價同最佳賣價之間嘅罅。<strong>只有當新單「越過」呢條罅(cross the spread)先會成交</strong> —— 即係買家肯出 ≥ 最低賣價,或者賣家肯收 ≤ 最高買價。</p>
+
+      <h3>價格-時間優先 —— 成個 project 嘅靈魂</h3>
+      <ol>
+        <li><strong>價格行先。</strong>最好價贏。Taker 買嘢,<em>最平</em>嗰張 ask 先成交;Taker 賣嘢,<em>最貴</em>嗰張 bid 先成交。</li>
+        <li><strong>時間行第二(FIFO)。</strong>價錢打和?咁就<em>邊個早掛邊個先成交</em>。你冇得靠惡、靠嗌交插隊,你只可以靠出更好嘅價或者早啲到。</li>
+      </ol>
+
+      <div class="callout blue">
+        <strong>Maker 價成交(最微妙嗰條規則):</strong>成交價係跟<em>掛單者(maker)</em>嘅價,唔係跟 taker 嘅價。你掛張買單話「我最多肯畀 105」,但市場有張 ask 掛喺 100 → 你最後係畀 <strong>100</strong>。呢個叫做 <em>price improvement(價格改善)</em>,真實市場就係咁運作。
+      </div>
+
+      <h3>限價單(Limit)同市價單(Market)</h3>
+      <ul>
+        <li><strong>Limit 限價單</strong> = 「要成交,但一定要喺我嗰個價或者更好。」食唔晒嘅就<em>掛喺 book 度等</em>(變咗 maker)。</li>
+        <li><strong>Market 市價單</strong> = 「即刻成交,咩價都得。」貪心咁掃晒個 book;食唔晒嗰部分會直接<strong>掉咗(drop)</strong> —— 市價單永遠唔會掛喺度。</li>
+      </ul>
+
+      <div class="callout green">
+        <strong>整數價。</strong>全部嘢都用 <code>int64</code>(分/手),永遠唔用 <code>float64</code>。因為 float 連 0.10 都冇辦法準確表示,所以金融 code 一定用整數嚟做精確運算。呢個係真實世界嘅正確性決定,唔係求其。
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section id="s3">
+    <h2><span class="n">3</span><span class="lang-en">Architecture</span><span class="lang-zh">架構</span></h2>
+    <pre><span class="cmt">internal/orderbook/orderbook.go      </span><span class="cmt"># the engine. Pure logic, no I/O.</span>
+<span class="cmt">internal/orderbook/orderbook_test.go </span><span class="cmt"># 12 tests, one per rule</span>
+<span class="cmt">cmd/demo/main.go                     </span><span class="cmt"># scripted visual demo (the ladder)</span></pre>
+    <div class="lang-en">
+      <p><code>internal/</code> is a Go convention: nothing outside this module can import that package. It enforces "this is the engine — talk to it only through its public API." The engine does <strong>no printing, no networking, no concurrency</strong> — that separation is deliberate and is what makes it testable.</p>
+    </div>
+    <div class="lang-zh">
+      <p><code>internal/</code> 係 Go 嘅慣例:呢個 module 以外嘅嘢<strong>冇權 import 入面嘅 package</strong>。咁就強制咗「呢個係引擎,你只可以透過佢嘅公開 API 同佢溝通」。引擎本身<strong>冇 print、冇網絡、冇 concurrency</strong> —— 呢個分離係刻意嘅,亦都係佢咁易 test 嘅原因。</p>
+    </div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section id="s4">
+    <h2><span class="n">4</span><span class="lang-en">Data structures — the clever part</span><span class="lang-zh">數據結構 —— 最精彩嘅部分</span></h2>
+    <div class="lang-en">
+      <p>The challenge: answer "what's the best price?" <em>instantly</em>, fill orders in <em>time order</em>, AND cancel any order by ID <em>instantly</em>. No single structure does all three, so the code layers a few:</p>
+    </div>
+    <div class="lang-zh">
+      <p>挑戰係:要<em>即刻</em>答到「最佳價係幾多?」,又要跟<em>時間順序</em>成交,又要可以靠 ID <em>即刻</em> cancel 任何一張單。冇單一個結構做得晒呢三樣,所以段 code 疊咗幾層落去:</p>
+    </div>
+    <pre>OrderBook
+ ├─ bids  *side ─┐
+ ├─ asks  *side ─┤  <span class="cmt">// each side:</span>
+ │               │    levels  map[price]*level   <span class="cmt">→ O(1) jump to a price</span>
+ │               │    prices  []int64 (sorted)   <span class="cmt">→ find the best price</span>
+ │               └────  isBid  bool
+ └─ resting map[string]*resting   <span class="cmt">→ O(1) find ANY order by ID (for cancel)</span></pre>
+
+    <div class="lang-en">
+      <p>Each <code>level</code> (all orders at one price) holds its orders in a <code>container/list</code> — a <strong>doubly-linked list</strong> used as a FIFO queue:</p>
+    </div>
+    <div class="lang-zh">
+      <p>每個 <code>level</code>(同一個價位嘅所有單)用 <code>container/list</code> —— 即係一條<strong>雙向鏈表</strong>,當做 FIFO 排隊:</p>
+    </div>
+    <pre>level @ price 100:  [a1] ⇄ [a2] ⇄ [a3]
+                     ↑ front (fills first)   ↑ back (newest)</pre>
+
+    <div class="callout">
+      <div class="lang-en"><strong>The elegant trick:</strong> removing from the middle (a cancel) is <strong>O(1)</strong> if you already hold a pointer to the node — and the engine does. Each <code>resting</code> struct stores its own <code>elem</code>, <code>level</code> and <code>side</code> back-pointers. So <code>Cancel</code> = look up ID in the map → follow the pointer → unlink → done, all O(1).</div>
+      <div class="lang-zh"><strong>最靚仔嘅技巧:</strong>如果你<em>已經揸住嗰個 node 嘅指針</em>,喺中間刪一張單(cancel)就係 <strong>O(1)</strong> —— 而引擎正正揸住。每個 <code>resting</code> struct 自己存住 <code>elem</code>、<code>level</code>、<code>side</code> 嘅反向指針。所以 <code>Cancel</code> = 用 ID 喺 map 度搵到 → 跟住指針 → 解開個 link → 搞掂,全部 O(1)。</div>
+    </div>
+
+    <div class="lang-en">
+      <p>The <code>prices</code> slice stays <strong>sorted ascending</strong> always, so: best <strong>ask</strong> = <code>prices[0]</code> (lowest sell), best <strong>bid</strong> = <code>prices[len-1]</code> (highest buy). That's the whole <code>best()</code> function.</p>
+    </div>
+    <div class="lang-zh">
+      <p><code>prices</code> 個 slice <strong>永遠由細到大排好序</strong>,所以:最佳 <strong>ask</strong> = <code>prices[0]</code>(最低賣價),最佳 <strong>bid</strong> = <code>prices[len-1]</code>(最高買價)。成個 <code>best()</code> function 就係咁簡單。</p>
+    </div>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section id="s5">
+    <h2><span class="n">5</span><span class="lang-en">The matching algorithm</span><span class="lang-zh">撮合演算法</span></h2>
+    <div class="lang-en"><p>The whole engine is one function: <code>Submit</code>. Its shape:</p></div>
+    <div class="lang-zh"><p>成個引擎其實就係一個 function:<code>Submit</code>。佢個骨架:</p></div>
+    <pre class="lang-en"><span class="kw">validate</span> (qty &gt; 0, limit price &gt; 0, no duplicate ID)
+pick the <span class="kw">OPPOSITE</span> side to match against
+<span class="kw">for</span> remaining &gt; 0:
+    best, ok := opposite.best()            <span class="cmt">// peek the best price</span>
+    <span class="kw">if</span> no opposite side → stop
+    <span class="kw">if</span> LIMIT and best price is worse than my limit → stop   <span class="cmt">← key line</span>
+    walk this price level FIFO:
+        maker = front of the queue
+        q = min(my remaining, maker's remaining)
+        record a Trade <span class="kw">at the MAKER's price</span>
+        decrement both; if maker hits 0, remove + delete from id map
+    drop the level if it's now empty
+<span class="kw">after</span> the loop: if LIMIT and remainder &gt; 0 → rest it on MY side</pre>
+    <pre class="lang-zh"><span class="kw">驗證</span> (數量 &gt; 0、限價單嘅價 &gt; 0、ID 唔可以重複)
+揀「<span class="kw">對面</span>」嗰邊嚟撮合
+<span class="kw">當</span> 我仲有貨未食完:
+    best, ok := 對面.best()                <span class="cmt">// 偷睇對面最佳價</span>
+    <span class="kw">如果</span> 對面冇單 → 收手
+    <span class="kw">如果</span> 係 LIMIT 而 best 價已經差過我嘅限價 → 收手   <span class="cmt">← 關鍵嗰行</span>
+    跟住 FIFO 行呢個價位嘅隊:
+        maker = 隊頭嗰張
+        q = min(我剩低嘅, maker 剩低嘅)
+        記低一單 Trade,<span class="kw">用 MAKER 嘅價</span>
+        兩邊都扣數;maker 扣到 0 就刪走 + 喺 id map 度 delete
+    呢個價位空咗就 drop 佢
+<span class="kw">loop 完</span>:如果係 LIMIT 而仲有剩 → 將佢掛喺「我自己」嗰邊</pre>
+    <div class="callout">
+      <div class="lang-en"><strong>One line</strong> distinguishes limit from market: the price check. A market order <em>skips</em> it, so it keeps sweeping regardless of price; a limit order <code>break</code>s the moment the best opposite price crosses past its limit.</div>
+      <div class="lang-zh"><strong>分辨限價同市價</strong>嘅就係嗰一行價格檢查。市價單<em>完全跳過</em>佢,所以唔理價錢一路掃落去;限價單就喺對面最佳價一越過佢個限價嗰刻即刻 <code>break</code>。</div>
+    </div>
+  </section>
+
+  <!-- ============ 6 ============ -->
+  <section id="s6">
+    <h2><span class="n">6</span><span class="lang-en">The demo, decoded</span><span class="lang-zh">Demo 拆解</span></h2>
+    <div class="lang-en"><p>After the setup orders rest, the book looks like this:</p></div>
+    <div class="lang-zh"><p>開場掛咗四張單之後,個 book 變成咁:</p></div>
+
+    <div class="ladder">
+      <div class="row ask"><span>ASK 102</span><span class="q">x5</span></div>
+      <div class="row ask"><span>ASK 101</span><span class="q">x5</span></div>
+      <span class="spread">– spread –</span>
+      <div class="row bid"><span>BID 100</span><span class="q">x3</span></div>
+      <div class="row bid"><span>BID  99</span><span class="q">x5</span></div>
+    </div>
+
+    <div class="lang-en"><p><strong>BUY 8 @ 102</strong> — a taker crossing the asks. Watch price-priority:</p></div>
+    <div class="lang-zh"><p><strong>BUY 8 @ 102</strong> —— 一個 taker 越過晒啲 ask。睇下價格優先點運作:</p></div>
+
+    <!-- ===== DEEP WALKTHROUGH ===== -->
+    <div class="callout blue">
+      <div class="lang-en"><strong>First — where is the "8"?</strong> The ladder above shows the <em>book</em> (orders <strong>resting</strong>, waiting). <code>BUY 8 @ 102</code> is a <strong>brand-new incoming order</strong> — it is NOT on the book. The 8 is <em>how much it wants to buy</em>. Below, watch that 8 get eaten down to 0.</div>
+      <div class="lang-zh"><strong>首先 —— 個「8」喺邊?</strong>上面個 ladder 顯示嘅係<em>個 book</em>(啲單<strong>掛喺度等緊</strong>)。<code>BUY 8 @ 102</code> 係一張<strong>啱啱入嚟嘅新單</strong> —— 佢<strong>唔喺</strong> book 上面。個 8 係佢<em>想買幾多</em>。等陣睇住個 8 點樣畀人食到變 0。</div>
+    </div>
+
+    <div class="vs">
+      <div class="col">
+        <h4><span class="lang-en">The book (resting)</span><span class="lang-zh">個 book(掛緊單)</span></h4>
+        <div class="ladder" style="margin-top:0">
+          <div class="row ask"><span>ASK 102 (a2)</span><span class="q">x5</span></div>
+          <div class="row ask"><span>ASK 101 (a1)</span><span class="q">x5</span></div>
+          <span class="spread">– spread –</span>
+          <div class="row bid"><span>BID 100 (b2)</span><span class="q">x3</span></div>
+          <div class="row bid"><span>BID  99 (b1)</span><span class="q">x5</span></div>
+        </div>
+      </div>
+      <div class="col">
+        <h4><span class="lang-en">The incoming order (taker)</span><span class="lang-zh">啱入嚟嗰張(taker)</span></h4>
+        <div class="taker-card">
+          <div class="big">BUY 8 @ 102</div>
+          <div class="sub lang-en">id <code>b3</code> · wants 8 · pays up to 102<br>not resting — it matches NOW</div>
+          <div class="sub lang-zh">id <code>b3</code> · 想要 8 · 最多畀 102<br>唔會掛單 —— 即刻撮合</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lang-en"><p style="margin-top:20px"><strong>Now the engine matches, step by step.</strong> A buyer takes the <em>cheapest</em> ask first. Keep your eye on <span class="meter">remaining = <b>8</b></span> — the taker's leftover need.</p></div>
+    <div class="lang-zh"><p style="margin-top:20px"><strong>而家引擎一步一步撮合。</strong>買家先食<em>最平</em>嗰張 ask。盯住 <span class="meter">remaining = <b>8</b></span> —— 即係 taker 仲爭幾多。</p></div>
+
+    <!-- step 1 -->
+    <div class="step">
+      <div class="dot">1</div>
+      <div class="body">
+        <p class="t lang-en"><strong>Cheapest ask = 101 (a1, has 5).</strong> Is 101 ≤ my limit 102? Yes → trade. I need 8, a1 has 5, so trade <code>min(8,5)=5</code>.</p>
+        <p class="t lang-zh"><strong>最平嘅 ask = 101(a1,有 5)。</strong>101 ≤ 我嘅限價 102?係 → 成交。我要 8,a1 有 5,成交 <code>min(8,5)=5</code>。</p>
+        <span class="chip eat">eat a1: 5 @ 101</span>
+        <div class="meter lang-en">remaining: <b>8</b> − 5 = <b>3</b> · a1: 5 − 5 = <span class="ok">0 → removed from book</span></div>
+        <div class="meter lang-zh">remaining: <b>8</b> − 5 = <b>3</b> · a1: 5 − 5 = <span class="ok">0 → 喺 book 度刪走</span></div>
+      </div>
+    </div>
+
+    <!-- step 2 -->
+    <div class="step">
+      <div class="dot">2</div>
+      <div class="body">
+        <p class="t lang-en"><strong>a1 is gone, next cheapest ask = 102 (a2, has 5).</strong> Is 102 ≤ 102? Yes → trade. I only need 3 now, so trade <code>min(3,5)=3</code>.</p>
+        <p class="t lang-zh"><strong>a1 冇咗,下一個最平 ask = 102(a2,有 5)。</strong>102 ≤ 102?係 → 成交。我而家淨係爭 3,所以成交 <code>min(3,5)=3</code>。</p>
+        <span class="chip eat">eat a2: 3 @ 102</span>
+        <div class="meter lang-en">remaining: <b>3</b> − 3 = <span class="ok">0</span> · a2: 5 − 3 = <b>2 left resting</b></div>
+        <div class="meter lang-zh">remaining: <b>3</b> − 3 = <span class="ok">0</span> · a2: 5 − 3 = <b>2 仲掛喺度</b></div>
+      </div>
+    </div>
+
+    <!-- step 3 -->
+    <div class="step done">
+      <div class="dot">✓</div>
+      <div class="body">
+        <p class="t lang-en"><strong>remaining = 0 → stop.</strong> The whole 8 is used up (5 + 3). Because nothing is left over, the taker rests <strong>nothing</strong> on the book — that's why you never see an "8" in any ladder. It became two trades:</p>
+        <p class="t lang-zh"><strong>remaining = 0 → 收手。</strong>成個 8 用晒(5 + 3)。因為冇剩,taker <strong>乜都唔會</strong>掛上 book —— 所以你喺任何 ladder 都唔會見到個「8」。佢變咗兩單成交:</p>
+      </div>
+    </div>
+
+    <p class="trade">TRADE b3 takes a1 &nbsp;qty 5 @ 101 &nbsp;<span class="muted">← step 1 / 第一步</span><br>
+       TRADE b3 takes a2 &nbsp;qty 3 @ 102 &nbsp;<span class="muted">← step 2 / 第二步</span></p>
+
+    <div class="lang-en">
+      <p><strong>The arithmetic of the 8:</strong> &nbsp;<code>8 wanted = 5 (from a1 @101) + 3 (from a2 @102) + 0 left over</code>. The asks held 5+5 = 10, the buy took 8, so <strong>2 remain at 102</strong>.</p>
+      <p>And note the price: b3 was "willing to pay 102", but its <strong>first 5 filled at 101</strong> — the maker a1's price. That cheaper-than-your-limit fill is <em>price improvement</em>. The last 3 filled at 102 because that was the next resting price.</p>
+    </div>
+    <div class="lang-zh">
+      <p><strong>個 8 嘅數係咁計:</strong> &nbsp;<code>想要 8 = 5(由 a1 @101)+ 3(由 a2 @102)+ 剩 0</code>。啲 ask 本身有 5+5 = 10,個買單食咗 8,所以 <strong>102 度剩低 2</strong>。</p>
+      <p>留意個價:b3「肯畀 102」,但佢<strong>頭 5 個係喺 101 食到</strong> —— 即係 maker a1 嘅價。呢種「平過你限價」嘅成交就係 <em>price improvement(價格改善)</em>。最後 3 個喺 102 食,係因為嗰個係下一個掛單嘅價。</p>
+    </div>
+
+    <h4 style="color:var(--muted); text-transform:uppercase; letter-spacing:.5px; font-size:.85rem; margin-top:18px">
+      <span class="lang-en">The book AFTER buy 8</span><span class="lang-zh">食完 buy 8 之後個 book</span></h4>
+    <div class="ladder">
+      <div class="row ask"><span>ASK 102 (a2)</span><span class="q">x2</span></div>
+      <span class="spread"><span class="lang-en">a1 fully eaten — gone</span><span class="lang-zh">a1 全部食晒 —— 冇咗</span></span>
+      <div class="row bid"><span>BID 100 (b2)</span><span class="q">x3</span></div>
+      <div class="row bid"><span>BID  99 (b1)</span><span class="q">x5</span></div>
+    </div>
+
+    <div class="lang-en"><p><strong>MARKET sell 4</strong> — taker hits the bids, best (highest) first:</p></div>
+    <div class="lang-zh"><p><strong>MARKET sell 4</strong> —— taker 撞向啲 bid,由最佳(最高)開始:</p></div>
+    <p class="trade">TRADE s1 takes b2 &nbsp;qty 3 @ 100 &nbsp;<span class="muted">← highest bid first / 最高嗰張先</span><br>
+       TRADE s1 takes b1 &nbsp;qty 1 @ 99 &nbsp;&nbsp;<span class="muted">← next, partial / 下一個,食一部分</span></p>
+    <div class="lang-en"><p>That's price-time priority on the other side of the book.</p></div>
+    <div class="lang-zh"><p>呢個就係喺 book 另一邊嘅 price-time priority。</p></div>
+  </section>
+
+  <!-- ============ 7 ============ -->
+  <section id="s7">
+    <h2><span class="n">7</span><span class="lang-en">Honest trade-offs</span><span class="lang-zh">老實嘅工程取捨</span></h2>
+    <div class="lang-en">
+      <ul>
+        <li><strong>Not concurrency-safe.</strong> A real venue runs <em>one matching thread per instrument</em> fed by a channel — no locks needed. Listed as next step #1.</li>
+        <li><strong>Inserting a price level is O(n)</strong> — the sorted slice shifts elements. Fine for clarity; production uses a tick-indexed array or an intrusive tree.</li>
+        <li><strong>The test suite is the real spec.</strong> 12 tests, one per rule. To learn the engine, read <code>orderbook_test.go</code> top to bottom — each test is a tiny worked example.</li>
+      </ul>
+    </div>
+    <div class="lang-zh">
+      <ul>
+        <li><strong>唔係 concurrency-safe。</strong>真實交易所係<em>一隻商品一條撮合 thread</em>,靠 channel 餵單入去 —— 咁就唔使用鎖。列咗做頭號 next step。</li>
+        <li><strong>插入一個新價位係 O(n)</strong> —— 排好序嘅 slice 要 shift 啲元素。為咗清晰冇問題;production 會用以 tick 做 index 嘅 array 或者 intrusive tree。</li>
+        <li><strong>測試套件先係真正嘅 spec。</strong>12 個 test,一條規則一個。想真正學識個引擎,由頭到尾讀 <code>orderbook_test.go</code> —— 每個 test 就係某條規則嘅迷你實例。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 8 ============ -->
+  <section id="s8">
+    <h2><span class="n">8</span><span class="lang-en">How to learn it hands-on</span><span class="lang-zh">點樣落手學</span></h2>
+    <div class="lang-en">
+      <ol>
+        <li><strong>Read <code>orderbook_test.go</code> first</strong> — the engine's behaviour in plain examples.</li>
+        <li>Then read <code>Submit</code> in <code>orderbook.go</code> next to the matching-loop pseudocode above.</li>
+        <li><strong>Edit <code>cmd/demo/main.go</code></strong> — add your own orders and <em>predict the output before running</em> <code>go run ./cmd/demo</code>. Match your prediction → you've got it.</li>
+        <li>Try implementing <strong>IOC</strong> (immediate-or-cancel: match what you can, drop the rest, never rest) — a tiny change to <code>Submit</code>, and a great proof you understand the resting logic.</li>
+      </ol>
+    </div>
+    <div class="lang-zh">
+      <ol>
+        <li><strong>先讀 <code>orderbook_test.go</code></strong> —— 個引擎嘅行為,用淺白例子寫晒。</li>
+        <li>然後讀 <code>orderbook.go</code> 入面嘅 <code>Submit</code>,對住上面段撮合 loop pseudocode 嚟睇。</li>
+        <li><strong>改 <code>cmd/demo/main.go</code></strong> —— 加你自己嘅單,<em>跑之前先估個輸出</em>,再 <code>go run ./cmd/demo</code>。估中咗就代表你真係識。</li>
+        <li>試下實現 <strong>IOC</strong>(immediate-or-cancel:能食幾多食幾多,剩低掉咗,永遠唔掛單)—— 改 <code>Submit</code> 一細粒就得,係驗證你明唔明掛單邏輯嘅好練習。</li>
+      </ol>
+    </div>
+  </section>
+
+  <footer>
+    <p>orderbook-engine · <span class="lang-en">generated explainer page · toggle 廣東話 / English above</span><span class="lang-zh">教學頁 · 上面可切換 廣東話 / English</span></p>
+  </footer>
+</div>
+
+<script>
+  function setLang(l){
+    document.body.classList.toggle('show-zh', l === 'zh');
+    document.getElementById('btn-en').classList.toggle('active', l === 'en');
+    document.getElementById('btn-zh').classList.toggle('active', l === 'zh');
+    try{ localStorage.setItem('ob-lang', l); }catch(e){}
+  }
+  try{
+    var saved = localStorage.getItem('ob-lang');
+    if(saved) setLang(saved);
+  }catch(e){}
+</script>
+</body>
+</html>
