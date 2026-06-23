@@ -192,7 +192,8 @@
       <a href="#s5"><span class="lang-en">5 · Matching algorithm</span><span class="lang-zh inline">5 · 撮合演算法</span></a>
       <a href="#s6"><span class="lang-en">6 · Demo decoded</span><span class="lang-zh inline">6 · Demo 拆解</span></a>
       <a href="#s7"><span class="lang-en">7 · Trade-offs</span><span class="lang-zh inline">7 · 工程取捨</span></a>
-      <a href="#s8"><span class="lang-en">8 · How to learn it</span><span class="lang-zh inline">8 · 點樣學</span></a>
+      <a href="#s8"><span class="lang-en">8 · Concurrency &amp; mutex</span><span class="lang-zh inline">8 · 並發同 mutex</span></a>
+      <a href="#s9"><span class="lang-en">9 · How to learn it</span><span class="lang-zh inline">9 · 點樣學</span></a>
     </div>
   </section>
 
@@ -492,9 +493,99 @@ pick the <span class="kw">OPPOSITE</span> side to match against
     </div>
   </section>
 
-  <!-- ============ 8 ============ -->
+  <!-- ============ 8 · CONCURRENCY ============ -->
   <section id="s8">
-    <h2><span class="n">8</span><span class="lang-en">How to learn it hands-on</span><span class="lang-zh">點樣落手學</span></h2>
+    <h2><span class="n">8</span><span class="lang-en">Concurrency — do you need a mutex?</span><span class="lang-zh">並發 —— 使唔使 mutex 鎖?</span></h2>
+
+    <div class="lang-en"><p>In reality thousands of orders hit at the same moment. So do you need a <code>sync.Mutex</code>? Surprisingly, real high-performance exchanges usually <strong>don't</strong>. Here's why.</p></div>
+    <div class="lang-zh"><p>現實中一定有幾千張單同一刻殺到。咁係咪要用 <code>sync.Mutex</code> 鎖?可能同你諗嘅相反:真實嘅高頻交易所通常<strong>唔用</strong>。等我解釋。</p></div>
+
+    <h3><span class="lang-en">1 · Matching is inherently serial</span><span class="lang-zh">1 · 撮合本質上一定要排隊</span></h3>
+    <div class="lang-en"><p>If two buys both try to take the <em>same</em> resting ask (which only has 5) at the same instant, they're <strong>racing for the same liquidity</strong>:</p></div>
+    <div class="lang-zh"><p>如果兩張買單<em>同一刻</em>都想食市場上同一張 ask(嗰張得 5 個),佢哋係<strong>爭緊同一批 liquidity</strong>:</p></div>
+    <pre>        ASK 101  x5   <span class="cmt">← 得 5 個 / only 5 available</span>
+       ↗        ↖
+  BUY 5      BUY 5     <span class="cmt">← 兩張同時殺到 / both arrive at once</span></pre>
+    <div class="callout">
+      <div class="lang-en">Run them truly in parallel and both might think they got 5 → you sold 10 of something that only had 5 → <strong>double-spend</strong>. So matching <em>must</em> be serialised no matter what. The only question is <strong>how you serialise</strong>.</div>
+      <div class="lang-zh">如果真係並行處理,兩張可能都以為自己食到 5 → 賣咗 10 個但其實得 5 個 → <strong>超賣(double-spend)</strong>。所以撮合<em>無論點都一定要序列化</em>。問題淨係:<strong>你用咩方法去排隊。</strong></div>
+    </div>
+
+    <h3><span class="lang-en">Option A · A mutex (works, but not best)</span><span class="lang-zh">方法 A · 用 Mutex(得,但唔係最好)</span></h3>
+    <div class="lang-en"><p>You <em>can</em> wrap every <code>Submit</code>/<code>Cancel</code> in a lock:</p></div>
+    <div class="lang-zh"><p>你<em>係可以</em>喺每次 <code>Submit</code>/<code>Cancel</code> 外面包個鎖:</p></div>
+    <pre><span class="kw">func</span> (ob *OrderBook) <span class="fn">Submit</span>(o Order) ([]Trade, error) {
+    ob.mu.<span class="fn">Lock</span>()
+    <span class="kw">defer</span> ob.mu.<span class="fn">Unlock</span>()
+    <span class="cmt">// ... matching logic ...</span>
+}</pre>
+    <div class="lang-en"><p>Correct and simple at small scale. But under load: <strong>lock contention</strong> (hundreds of threads block waiting), <strong>unpredictable tail latency</strong> (you never know when you'll get the lock — fatal for trading), and it <strong>buys no real parallelism</strong> anyway — the critical section is still one-at-a-time because of the double-spend problem above.</p></div>
+    <div class="lang-zh"><p>細規模冇問題。但高負載下:<strong>爭鎖(lock contention)</strong>(幾百條 thread 喺度等),<strong>延遲忽快忽慢</strong>(唔知幾時搶到鎖 —— 交易系統最忌),而且<strong>根本攞唔到真正並行</strong> —— 因為上面講嘅超賣問題,撮合嗰段始終一次一張。</p></div>
+
+    <h3><span class="lang-en">Option B · One matching thread + a queue (no lock!)</span><span class="lang-zh">方法 B · 單一撮合 thread + 隊列(冇鎖!)</span></h3>
+    <div class="lang-en"><p>The industry standard (LMAX Disruptor, most real exchanges): <strong>one matching thread per instrument</strong>.</p></div>
+    <div class="lang-zh"><p>業界標準(LMAX Disruptor、大部分真實交易所):<strong>一隻商品一條撮合 thread</strong>。</p></div>
+    <pre><span class="cmt">  many producers (intake)              one consumer (matching)</span>
+  goroutine 1 ─┐
+  goroutine 2 ─┤──→  [ order channel / queue ]  ──→  match goroutine ──→ mutate book
+  goroutine 3 ─┘         (orders line up)            (the ONLY one touching the book)</pre>
+    <pre><span class="kw">type</span> request <span class="kw">struct</span> {
+    order Order
+    reply <span class="kw">chan</span> []Trade   <span class="cmt">// result comes back over a channel</span>
+}
+
+<span class="cmt">// Only THIS one goroutine ever touches the OrderBook.</span>
+<span class="kw">func</span> (ob *OrderBook) <span class="fn">Run</span>(in &lt;-<span class="kw">chan</span> request) {
+    <span class="kw">for</span> req := <span class="kw">range</span> in {              <span class="cmt">// the channel does the queuing</span>
+        trades, _ := ob.<span class="fn">Submit</span>(req.order)
+        req.reply &lt;- trades
+    }
+}</pre>
+    <div class="callout green">
+      <div class="lang-en"><strong>The key:</strong> only one goroutine ever touches the book → there is no race → no lock needed. The concurrency moved to the <strong>channel</strong>: many producers push, one consumer pops. The channel handles thread-safety; the book stays blissfully single-threaded.</div>
+      <div class="lang-zh"><strong>重點:</strong>成個 book 由頭到尾淨係一條 goroutine 掂 → 根本冇得 race → 唔使鎖。並發性搬咗去個 <strong>channel</strong> 度:好多 goroutine 塞單入去,一條攞出嚟做。個 channel 處理咗 thread-safety,個 book 完全唔使理。</div>
+    </div>
+
+    <h3><span class="lang-en">Why it beats a mutex</span><span class="lang-zh">點解好過 Mutex</span></h3>
+    <table>
+      <tr><th></th><th>Mutex</th><th class="lang-en">One thread + queue</th><th class="lang-zh">單 thread + 隊列</th></tr>
+      <tr>
+        <td><span class="lang-en">Latency</span><span class="lang-zh">延遲</span></td>
+        <td><span class="lang-en">jittery (depends on lock)</span><span class="lang-zh">忽快忽慢(睇搶唔搶到鎖)</span></td>
+        <td colspan="2"><span class="lang-en">stable, predictable</span><span class="lang-zh">穩定、可預測</span></td>
+      </tr>
+      <tr>
+        <td>Cache</td>
+        <td><span class="lang-en">cores bounce the data around</span><span class="lang-zh">幾個 core 搶同一份 data</span></td>
+        <td colspan="2"><span class="lang-en">book stays hot on one core</span><span class="lang-zh">book 長留同一 core 嘅 cache</span></td>
+      </tr>
+      <tr>
+        <td><span class="lang-en">Replayable</span><span class="lang-zh">可重播</span></td>
+        <td><span class="lang-en">order non-deterministic</span><span class="lang-zh">次序唔確定</span></td>
+        <td colspan="2"><span class="lang-en"><strong>deterministic → fully replayable</strong></span><span class="lang-zh"><strong>次序確定 → 可完全重播</strong></span></td>
+      </tr>
+    </table>
+    <div class="callout blue">
+      <div class="lang-en"><strong>"Replayable" matters a lot:</strong> a deterministic order means you can re-run the exact same order stream and get the exact same result — essential for debugging, audits and regulatory reporting. A mutex's "whoever grabs it first" gives you no such guarantee.</div>
+      <div class="lang-zh"><strong>「可重播」好緊要:</strong>次序確定即係你可以將同一串訂單一模一樣咁重跑一次,得出一樣嘅結果 —— 查 bug、審計、監管報告全靠呢樣。Mutex 嗰種「邊個搶到算邊個」就冇呢個保證。</div>
+    </div>
+
+    <h3><span class="lang-en">So how do you use all your CPU cores? Shard by symbol</span><span class="lang-zh">咁點食盡多核 CPU?Shard by symbol</span></h3>
+    <pre>  BTC  book  →  match thread 1   ┐
+  ETH  book  →  match thread 2   ├─ <span class="cmt">truly parallel, different cores</span>
+  AAPL book  →  match thread 3   ┘   <span class="cmt">no shared state → still no locks</span></pre>
+    <div class="lang-en"><p>BTC and ETH books are unrelated (a BTC buy never matches an ETH sell), so each runs on its own core in true parallel — and <em>still</em> needs no lock. You get parallelism <strong>across instruments</strong>, not <em>within</em> one book (which can't be parallelised anyway).</p></div>
+    <div class="lang-zh"><p>BTC 同 ETH 嘅 book 完全冇關係(BTC 買單唔會同 ETH 賣單成交),所以各自喺唔同 core 真正並行 —— 而且<em>仍然</em>唔使鎖。並行性係喺「商品之間」攞,唔係喺「同一個 book 入面」攞(嗰度本身就並行唔到)。</p></div>
+
+    <div class="callout">
+      <div class="lang-en"><strong>One-line summary:</strong> matching must be serial, so the question isn't "lock or not" but "how to serialise." Real systems pick "one thread draining one queue" — no lock, stable latency, replayable. Scale with one thread per symbol. This repo doesn't do it yet — it's next step #1 in the README (see the comment at <code>orderbook.go:130-131</code>).</div>
+      <div class="lang-zh"><strong>一句總結:</strong>撮合一定要排隊,所以重點唔係「使唔使鎖」,而係「點排隊」。真實系統揀「一條 thread 食一條隊列」—— 冇鎖、延遲穩定、可重播。要食多核就一隻商品一條 thread。呢個 repo 而家未做,係 README 嘅頭號 next step(睇 <code>orderbook.go:130-131</code> 個註解)。</div>
+    </div>
+  </section>
+
+  <!-- ============ 9 ============ -->
+  <section id="s9">
+    <h2><span class="n">9</span><span class="lang-en">How to learn it hands-on</span><span class="lang-zh">點樣落手學</span></h2>
     <div class="lang-en">
       <ol>
         <li><strong>Read <code>orderbook_test.go</code> first</strong> — the engine's behaviour in plain examples.</li>
